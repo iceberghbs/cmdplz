@@ -1,5 +1,5 @@
 use colored::*;
-use dialoguer::{Confirm, Input, Password, Select};
+use dialoguer::{Confirm, Input, Select};
 use serde_json;
 use std::fs;
 use std::io::Write;
@@ -123,7 +123,7 @@ pub fn run_setup() {
 fn choose_provider_type() -> String {
     let items = vec!["openai (OpenAI-compatible API)", "anthropic (Anthropic Messages API)"];
     let idx = Select::new()
-        .with_prompt("Step 1/6 — Provider type")
+        .with_prompt("Step 1/6 — Provider endpoint")
         .items(&items)
         .default(0)
         .interact()
@@ -132,15 +132,12 @@ fn choose_provider_type() -> String {
 }
 
 fn choose_provider_url(provider_type: &str) -> String {
-    let mut items: Vec<String> = Vec::new();
-    if provider_type == "openai" {
-        items.push("https://api.openai.com/v1".to_string());
-        items.push("http://localhost:11434/v1 (Ollama)".to_string());
+    let official = if provider_type == "openai" {
+        "https://api.openai.com/v1"
     } else {
-        items.push("https://api.anthropic.com".to_string());
-        items.push("http://localhost:11434/v1 (Ollama via OpenAI compat)".to_string());
-    }
-    items.push("Custom URL".to_string());
+        "https://api.anthropic.com"
+    };
+    let items = vec![official.to_string(), "Custom URL".to_string()];
 
     let idx = Select::new()
         .with_prompt("Step 2/6 — Provider URL")
@@ -149,35 +146,36 @@ fn choose_provider_url(provider_type: &str) -> String {
         .interact()
         .unwrap_or(0);
 
-    if idx == items.len() - 1 {
+    if idx == 1 {
         Input::<String>::new()
             .with_prompt("Enter custom URL")
             .interact()
             .unwrap_or_default()
     } else {
-        items[idx].split_whitespace().next().unwrap_or("").to_string()
+        items[0].to_string()
     }
 }
 
 fn ask_api_key(provider_type: &str) -> String {
-    let default_blank = provider_type == "openai";
-    let prompt = if default_blank {
-        "Step 3/6 — API key (enter empty for local/no-auth)"
+    let default_empty = provider_type == "openai";
+    if default_empty {
+        Input::<String>::new()
+            .with_prompt("Step 3/6 — API key (leave empty for local/no-auth)")
+            .allow_empty(true)
+            .default(String::new())
+            .interact()
+            .unwrap_or_default()
     } else {
-        "Step 3/6 — API key (required for Anthropic)"
-    };
-    let key = Password::new()
-        .with_prompt(prompt)
-        .allow_empty_password(true)
-        .interact()
-        .unwrap_or_default();
-    key
+        Input::<String>::new()
+            .with_prompt("Step 3/6 — API key (required for Anthropic)")
+            .interact()
+            .unwrap_or_default()
+    }
 }
 
 fn ask_model() -> String {
     Input::<String>::new()
         .with_prompt("Step 4/6 — Model ID")
-        .default("gpt-4.1-mini".to_string())
         .interact()
         .unwrap_or_default()
 }
@@ -394,49 +392,68 @@ fn test_connection(provider_type: &str, provider_url: &str, api_key: &str, model
     let tmp_path = tmp_dir.join("config.json");
     fs::write(&tmp_path, &tmp_config).ok();
 
-    // Kill any existing daemon on the port
-    let _ = Command::new("pkill").arg("-f").arg("cmd-engine").output();
+    // Kill daemon if already running on 11435, but NOT ourselves
+    let in_use = std::process::Command::new("ss")
+        .args(["-tlnp", "sport", "=:11435"])
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).contains("11435"))
+        .unwrap_or(false);
 
-    // Start daemon in background with temp config
-    let _ = Command::new(&daemon_bin)
+    if in_use {
+        let our_pid = std::process::id();
+        let _ = std::process::Command::new("sh")
+            .arg("-c")
+            .arg(format!("ss -tlnp 'sport = :11435' | grep -oP 'pid=\\K\\d+' | grep -v {} | xargs -r kill 2>/dev/null", our_pid))
+            .output();
+    }
+
+    // Start daemon on a different port to avoid conflict
+    let child = Command::new(&daemon_bin)
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .spawn();
 
-    // Wait for daemon to be ready
-    std::thread::sleep(std::time::Duration::from_secs(2));
+    match child {
+        Ok(child) => {
+            let pid = child.id();
+            std::thread::sleep(std::time::Duration::from_secs(2));
 
-    // Send test request
-    let output = Command::new("curl")
-        .args([
-            "-s", "--max-time", "15",
-            "-X", "POST",
-            "http://127.0.0.1:11435/translate",
-            "-H", "Content-Type: application/json",
-            "-d", r#"{"input":"hello world","shell":"bash","cwd":"/tmp","os":"linux","history":[]}"#,
-        ])
-        .output()
-        .unwrap_or_else(|_| std::process::Output { status: Default::default(), stdout: vec![], stderr: vec![] });
+            let output = Command::new("curl")
+                .args([
+                    "-s", "--max-time", "15",
+                    "-X", "POST",
+                    "http://127.0.0.1:11435/translate",
+                    "-H", "Content-Type: application/json",
+                    "-d", r#"{"input":"hello world","shell":"bash","cwd":"/tmp","os":"linux","history":[]}"#,
+                ])
+                .output()
+                .unwrap_or_else(|_| std::process::Output { status: Default::default(), stdout: vec![], stderr: vec![] });
 
-    // Clean up daemon
-    let _ = Command::new("pkill").arg("-f").arg("cmd-engine").output();
+            // Kill our child daemon
+            let _ = Command::new("kill").arg(pid.to_string()).output();
+            std::thread::sleep(std::time::Duration::from_millis(500));
 
-    if let Ok(resp) = String::from_utf8(output.stdout) {
-        let cmd = resp.trim();
-        if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(cmd) {
-            if let Some(c) = parsed["command"].as_str() {
-                println!("{} Connection OK — sample response:", "✓".green());
-                println!("    Input:  \"hello world\"");
-                println!("    Output: \"{}\"", c);
-                return;
+            if let Ok(resp) = String::from_utf8(output.stdout) {
+                let cmd = resp.trim();
+                if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(cmd) {
+                    if let Some(c) = parsed["command"].as_str() {
+                        println!("{} Connection OK — sample response:", "✓".green());
+                        println!("    Input:  \"hello world\"");
+                        println!("    Output: \"{}\"", c);
+                        return;
+                    }
+                    if let Some(e) = parsed["error"].as_str() {
+                        println!("{} Connection failed: {}", "✗".red(), e);
+                        return;
+                    }
+                }
             }
-            if let Some(e) = parsed["error"].as_str() {
-                println!("{} Connection failed: {}", "✗".red(), e);
-                return;
-            }
+            println!("{} Connection failed — no response from daemon.", "✗".red());
+        }
+        Err(e) => {
+            println!("{} Cannot start daemon for test: {}", "✗".red(), e);
         }
     }
-    println!("{} Connection failed — no response from daemon.", "✗".red());
 }
 
 fn install_auto_start() {
