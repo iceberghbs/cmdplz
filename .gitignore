@@ -1,0 +1,8 @@
+target/
+*.log
+nohup.out
+.DS_Store
+.cache/
+*.tar.gz
+*.zip
+*.exe

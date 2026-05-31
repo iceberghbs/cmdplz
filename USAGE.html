@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>cmd-engine — AI Terminal Command Translator</title>
+  <style>
+    :root {
+      --bg: #0d1117;
+      --surface: #161b22;
+      --border: #30363d;
+      --text: #c9d1d9;
+      --muted: #8b949e;
+      --accent: #58a6ff;
+      --green: #3fb950;
+      --red: #f85149;
+      --yellow: #d2991d;
+      --code-bg: #1c2128;
+      --radius: 6px;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      max-width: 860px;
+      margin: 0 auto;
+      padding: 40px 24px 80px;
+    }
+    h1 { font-size: 2rem; margin-bottom: 8px; color: #fff; }
+    h2 {
+      font-size: 1.35rem;
+      margin: 40px 0 12px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--border);
+      color: #fff;
+    }
+    h3 { font-size: 1.1rem; margin: 24px 0 8px; color: #e6edf3; }
+    p { margin: 10px 0; color: var(--muted); }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .tagline { font-size: 1.1rem; color: var(--muted); margin-bottom: 24px; }
+
+    pre {
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 14px 18px;
+      overflow-x: auto;
+      font-size: 0.88rem;
+      line-height: 1.5;
+      margin: 12px 0;
+    }
+    code {
+      font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', Consolas, monospace;
+      font-size: 0.85em;
+    }
+    :not(pre) > code {
+      background: var(--code-bg);
+      padding: 2px 6px;
+      border-radius: 4px;
+      border: 1px solid var(--border);
+      color: var(--accent);
+    }
+
+    .example {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      margin: 16px 0;
+      overflow: hidden;
+    }
+    .example-label {
+      background: #1c2533;
+      padding: 6px 14px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      color: var(--accent);
+      border-bottom: 1px solid var(--border);
+    }
+    .example-body { padding: 14px 18px; }
+    .example-body .prompt { color: var(--green); }
+    .example-body .arrow  { color: var(--muted); }
+    .example-body .result { color: var(--accent); }
+
+    .steps { counter-reset: step; list-style: none; }
+    .steps li {
+      counter-increment: step;
+      margin: 14px 0;
+      padding-left: 34px;
+      position: relative;
+      color: var(--text);
+    }
+    .steps li::before {
+      content: counter(step);
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 22px;
+      height: 22px;
+      background: var(--accent);
+      color: #fff;
+      border-radius: 50%;
+      font-size: 0.78rem;
+      font-weight: 700;
+      text-align: center;
+      line-height: 22px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 12px 0;
+      font-size: 0.9rem;
+    }
+    th, td {
+      text-align: left;
+      padding: 8px 12px;
+      border-bottom: 1px solid var(--border);
+    }
+    th {
+      color: var(--accent);
+      font-weight: 600;
+      font-size: 0.8rem;
+      text-transform: uppercase;
+    }
+    td { color: var(--text); }
+    td.mono { font-family: monospace; font-size: 0.85em; }
+
+    .note {
+      border-left: 3px solid var(--yellow);
+      background: #1a1500;
+      padding: 10px 16px;
+      border-radius: 0 var(--radius) var(--radius) 0;
+      margin: 16px 0;
+      font-size: 0.9rem;
+      color: var(--text);
+    }
+    .note strong { color: var(--yellow); }
+
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 10px;
+      font-size: 0.7rem;
+      font-weight: 600;
+      margin-left: 6px;
+      vertical-align: middle;
+    }
+    .badge-ok { background: #1a3a1a; color: var(--green); }
+    .badge-err { background: #3a1a1a; color: var(--red); }
+  </style>
+</head>
+<body>
+
+<h1>cmd-engine</h1>
+<p class="tagline">AI-powered terminal command translator — type in plain English, get shell commands back.</p>
+
+<h2>How it works</h2>
+<p>
+  You type what you want to do in natural language right at your terminal prompt.
+  Press <code>Ctrl+T</code> (customizable in config — see below). The daemon sends your text + context to an LLM,
+  replaces your input with the generated shell command, and you review it before
+  pressing <kbd>Enter</kbd>.
+</p>
+
+<div class="example">
+  <div class="example-label">Example</div>
+  <div class="example-body">
+    <pre><span class="prompt">$</span> find all files named config in the current folder
+<span class="arrow">▸</span> <em>Ctrl+T</em> <span class="arrow">▸</span> <span class="result">$ find . -name "config*"</span></pre>
+  </div>
+</div>
+
+<h2>Setup</h2>
+
+<div class="example">
+  <div class="example-label">Verified configuration (DeepSeek-V4-Pro via Sophnet)</div>
+  <div class="example-body">
+    <pre>{
+  "provider_type": "openai",
+  "provider_url": "https://www.sophnet.com/api/open-apis/v1",
+  "api_key": "01sGbdz...",
+  "model": "DeepSeek-V4-Pro",
+  "daemon_port": 11435,
+  "hotkey": "Ctrl+T",
+  "session_history_lines": 10,
+  "include_env_vars": true,
+  "timeout_ms": 15000
+}</pre>
+  </div>
+</div>
+
+<ol class="steps">
+  <li>
+    <strong>Run the interactive setup wizard</strong><br>
+    <code>./target/debug/cmd-engine setup</code><br>
+    Guides you through provider, URL, API key, model, hotkey, timeout — then
+    auto-installs the shell hook and optionally systemd auto-start.
+  </li>
+  <li>
+    <strong>Or configure manually</strong> — create <code>~/.config/cmd-engine/config.json</code>:
+    <pre>{
+  "provider_type": "openai",
+  "provider_url": "http://localhost:11434/v1",
+  "api_key": "",
+  "model": "qwen2.5:3b",
+  "daemon_port": 11435,
+  "hotkey": "Ctrl+T",
+  "session_history_lines": 10,
+  "include_env_vars": true,
+  "timeout_ms": 5000
+}</pre>
+    Then start with <code>./target/debug/cmd-engine &amp;</code> and add the shell hook below.
+  </li>
+</ol>
+
+<h2>Shell integration</h2>
+
+<h3>bash</h3>
+<p>Add to <code>~/.bashrc</code>:</p>
+<pre># cmd-engine — AI terminal command translator (Ctrl+T)
+__cmd_engine_translate() {
+  local input="$READLINE_LINE"
+  [ -z "$input" ] && return
+
+  # Auto-start daemon if not running
+  if ! curl -s --connect-timeout 1 http://127.0.0.1:11435/health > /dev/null 2>&1; then
+    local daemon_bin="$HOME/trmnl-cmplt-agent/target/debug/cmd-engine"
+    if [ -x "$daemon_bin" ]; then
+      { nohup "$daemon_bin" > /tmp/cmd-engine.log 2>&1 & } 2>/dev/null
+      disown 2>/dev/null
+    fi
+    sleep 1
+  fi
+
+  printf '\n⏳ translating...\n'
+
+  local resp=$(curl -s --max-time 20 -X POST http://127.0.0.1:11435/translate \
+    -H "Content-Type: application/json" \
+    -d "$(jq -n \
+      --arg input "$input" \
+      --arg shell "bash" \
+      --arg cwd "$PWD" \
+      --arg os "$(uname -s)" \
+      '{input: $input, shell: $shell, cwd: $cwd, os: $os, history: []}')")
+
+  # Stop spinner, clear line
+  kill $spinner_pid 2>/dev/null
+  wait $spinner_pid 2>/dev/null
+  printf '\r\033[K'
+
+  local cmd=$(echo "$resp" | jq -r '.command // empty')
+  local err=$(echo "$resp" | jq -r '.error // empty')
+
+  if [ -n "$cmd" ]; then
+    READLINE_LINE="$cmd"
+    READLINE_POINT="${#cmd}"
+  elif [ -n "$err" ]; then
+    printf '[ERR] %s\n' "$err"
+  fi
+}
+bind -x '"\C-t": __cmd_engine_translate'</pre>
+<div class="note"><strong>Indicator:</strong> A <code>⏳ translating...</code> message prints while waiting. It stays on screen as a visual log after the command appears.</div>
+
+<h3>zsh</h3>
+<p>Add to <code>~/.zshrc</code>:</p>
+<pre>__cmd_engine_translate() {
+  local input="$BUFFER"
+  if [ -z "$input" ]; then return; fi
+  BUFFER="⏳ translating..."
+  CURSOR=0
+  zle reset-prompt
+  local resp=$(curl -s -X POST http://127.0.0.1:11435/translate \
+    -H "Content-Type: application/json" \
+    -d "$(jq -n \
+      --arg input "$input" \
+      --arg shell "zsh" \
+      --arg cwd "$PWD" \
+      --arg os "$(uname -s)" \
+      '{input: $input, shell: $shell, cwd: $cwd, os: $os, history: []}')")
+  local cmd=$(echo "$resp" | jq -r '.command // empty')
+  local err=$(echo "$resp" | jq -r '.error // empty')
+  if [ -n "$cmd" ]; then
+    BUFFER="$cmd"
+    CURSOR=${#cmd}
+  elif [ -n "$err" ]; then
+    BUFFER="[ERR] $err"
+    CURSOR=0
+  fi
+  zle reset-prompt
+}
+zle -N __cmd_engine_translate
+bindkey '^T' __cmd_engine_translate</pre>
+
+<h3>PowerShell</h3>
+<p>Add to <code>$PROFILE</code>:</p>
+<pre>Set-PSReadLineKeyHandler -Key Ctrl+T -ScriptBlock {
+  $input = $null
+  [Microsoft.PowerShell.PSConsoleReadLine]::GetBufferState([ref]$input, [ref]$null)
+  if (-not $input) { return }
+  [Microsoft.PowerShell.PSConsoleReadLine]::Replace(
+    0, $input.Length, "⏳ translating...")
+  $body = @{
+    input   = $input
+    shell   = "pwsh"
+    cwd     = (Get-Location).Path
+    os      = if ($IsWindows) { "windows" } else { "linux" }
+    history = @()
+  } | ConvertTo-Json
+  $resp = Invoke-RestMethod -Uri "http://127.0.0.1:11435/translate" `
+    -Method Post -Body $body -ContentType "application/json" -TimeoutSec 5
+  if ($resp.command) {
+    [Microsoft.PowerShell.PSConsoleReadLine]::Replace(
+      0, $input.Length, $resp.command)
+  } elseif ($resp.error) {
+    [Microsoft.PowerShell.PSConsoleReadLine]::Replace(
+      0, "⏳ translating...".Length, "[ERR] $($resp.error)")
+  }
+}</pre>
+
+<h2>Configuration reference</h2>
+
+<table>
+  <tr><th>Field</th><th>Type</th><th>Description</th></tr>
+  <tr><td class="mono">provider_type</td><td class="mono">"openai" | "anthropic"</td><td>Which API format to use</td></tr>
+  <tr><td class="mono">provider_url</td><td>string</td><td>Base URL of the LLM API</td></tr>
+  <tr><td class="mono">api_key</td><td>string</td><td>API key; <code>""</code> for local providers with no auth</td></tr>
+  <tr><td class="mono">model</td><td>string</td><td>Model ID (<code>gpt-4o</code>, <code>claude-sonnet-4-20250514</code>, <code>qwen2.5:3b</code>)</td></tr>
+  <tr><td class="mono">daemon_port</td><td>u16</td><td>Port the daemon binds to (default <code>11435</code>)</td></tr>
+  <tr><td class="mono">hotkey</td><td>string</td><td>Key combo for translation trigger (default <code>Ctrl+T</code>). The daemon uses this to validate config; shell bindings must match</td></tr>
+  <tr><td class="mono">session_history_lines</td><td>u8</td><td>How many recent commands to send as context (default <code>10</code>)</td></tr>
+  <tr><td class="mono">include_env_vars</td><td>bool</td><td>Include key env vars like <code>VIRTUAL_ENV</code> (default <code>true</code>)</td></tr>
+  <tr><td class="mono">timeout_ms</td><td>u32</td><td>Max wait time for LLM response (default <code>5000</code>)</td></tr>
+</table>
+
+<h2>Provider examples</h2>
+
+<h3>Local Ollama</h3>
+<pre>{
+  "provider_type": "openai",
+  "provider_url": "http://localhost:11434/v1",
+  "api_key": "",
+  "model": "qwen2.5:3b"
+}</pre>
+
+<h3>OpenAI</h3>
+<pre>{
+  "provider_type": "openai",
+  "provider_url": "https://api.openai.com/v1",
+  "api_key": "sk-...",
+  "model": "gpt-4.1-mini"
+}</pre>
+
+<h3>Anthropic</h3>
+<pre>{
+  "provider_type": "anthropic",
+  "provider_url": "https://api.anthropic.com",
+  "api_key": "sk-ant-...",
+  "model": "claude-sonnet-4-20250514"
+}</pre>
+
+<h3>LM Studio (local)</h3>
+<pre>{
+  "provider_type": "openai",
+  "provider_url": "http://localhost:1234/v1",
+  "api_key": "",
+  "model": "local-model"
+}</pre>
+
+<h2>Interactive setup</h2>
+
+<p>Run the setup wizard — it guides you through every step:</p>
+
+<pre>./target/debug/cmd-engine setup
+# or: cargo run -- setup</pre>
+
+<p>The wizard will:</p>
+<ol class="steps">
+  <li><strong>Choose provider</strong> — OpenAI-compatible or Anthropic</li>
+  <li><strong>Set provider URL</strong> — Cloud preset, local Ollama, or custom URL</li>
+  <li><strong>Enter API key</strong> — masked input, skip for local providers</li>
+  <li><strong>Model ID</strong> — any model your provider supports</li>
+  <li><strong>Hotkey</strong> — Ctrl+T (default) or custom</li>
+  <li><strong>Timeout &amp; history</strong> — numeric, defaults 15000ms / 10 lines</li>
+</ol>
+
+<p>
+  After the summary, it optionally tests the connection, saves the config,
+  <strong>auto-installs the shell hook</strong> (detects bash/zsh/fish/pwsh),
+  and optionally sets up systemd auto-start at boot.
+</p>
+
+<h2>API reference</h2>
+
+<h3><code>POST /translate</code></h3>
+
+<pre>curl -X POST http://127.0.0.1:11435/translate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "input": "find all files named config",
+    "shell": "bash",
+    "cwd": "/home/user/projects",
+    "os": "linux",
+    "history": ["cd projects", "ls -la"]
+  }'</pre>
+
+<p><strong>Response (success):</strong></p>
+<pre>{"command": "find . -name \"config*\"", "error": null}</pre>
+
+<p><strong>Response (failure):</strong></p>
+<pre>{"command": null, "error": "LLM timeout"}</pre>
+
+<h3><code>GET /health</code></h3>
+
+<pre>curl -s http://127.0.0.1:11435/health</pre>
+<pre>{"status": "ok"}</pre>
+
+</body>
+</html>

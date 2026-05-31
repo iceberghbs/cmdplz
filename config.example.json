@@ -1,0 +1,11 @@
+{
+  "provider_type": "openai",
+  "provider_url": "http://localhost:11434/v1",
+  "api_key": "",
+  "model": "qwen2.5:3b",
+  "daemon_port": 11435,
+  "hotkey": "Ctrl+T",
+  "session_history_lines": 10,
+  "include_env_vars": true,
+  "timeout_ms": 5000
+}
